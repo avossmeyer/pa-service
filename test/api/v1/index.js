@@ -1,11 +1,8 @@
 // testing modules
-var request = require('supertest');
-var chai = require("chai");
-var sinon = require("sinon");
-var sinonChai = require("sinon-chai");
-chai.should();
-chai.use(sinonChai);
-var expect = chai.expect;
+var request = require('supertest'),
+    chai = require("chai"),
+    sinon = require("sinon"),
+    expect = chai.expect;
 
 // for mocking
 var projectAwesome = require('project-awesome');
@@ -26,10 +23,53 @@ describe('v1 API', function() {
         server.close();
     });
 
+    describe('GET /list', function() {
+        var listStub;
+        beforeEach(function() {
+            listStub = sinon.stub(projectAwesome, 'list');
+            listStub.withArgs('invalid-type').throws("Illegal Argument");
+            listStub.withArgs('valid-type').returns('list-response');
+        });
+        afterEach(function() {
+            listStub.restore();
+        });
+        describe('response body', function() {
+            var resBody;
+            beforeEach(function(done) {
+                request(app)
+                    .get('/v1/list?type=valid-type')
+                    .expect(200)
+                    .end(function(err, res) {
+                        if (err) return done(err);
+                        resBody = res.body;
+                        done();
+                    });
+            });
+            it('should be a json object', function() {
+                expect(resBody).to.be.an('object');
+            });
+            it('should contain a list property with the appropriate result', function() {
+                expect(resBody.list).to.equal('list-response');
+            });
+        });
+        describe('when projectAwesome.list throws an error', function() {
+            it('should respond with error code 400 and a message', function(done) {
+                request(app)
+                    .get('/v1/list?type=invalid-type')
+                    .expect(400)
+                    .end(function(err, res) {
+                        if (err) return done(err);
+                        expect(res.body).to.eql({"error":{"name":"Illegal Argument"}});
+                        done();
+                    });
+            });
+        });
+    });
+
     describe('GET /check', function() {
 
         it('should validate correct seeds', function(done) {
-            request(app)
+        request(app)
                 .get('/v1/check?type=seed&value=abcd1234')
                 .expect(200)
                 .end(function(err, res) {
@@ -49,10 +89,181 @@ describe('v1 API', function() {
                     done();
                 });
         });
+        
+        describe('when projectAwesome.check throws an error', function() {
+            it('should respond with error code 400', function(done) {
+                request(app)
+                    .get('/v1/check?type=invalid-type')
+                    .expect(400)
+                     .end(function(err, res) {
+                        if (err) return done(err);
+                        expect(res.body).eql({ error: 'Illegal Argument: invalid-type'});
+                        done();
+                    });
+            });
+        });
+        
+        describe('when projectAwesome.check recieves no type', function() {
+            it('should respond with error code 400 and include a message', function(done) {
+                request(app)
+                    .get('/v1/check?type=')
+                    .expect(400)
+                    .end(done);
+            });
+        });
+        
+        
+        it('should validate correct questionTypes', function(done) {
+            request(app)
+                .get('/v1/check?type=questionType&value=mc-change-of-base')
+                .expect(200)
+                .end(function(err, res) {
+                    if (err) return done(err);
+                    expect(res.body).to.eql({"valid":true});
+                    done();
+                });
+        });
+
+        it('should validate incorrect questionTypes', function(done) {
+            request(app)
+                .get('/v1/check?type=questionType&value=incorrectQuestionType')
+                .expect(200)
+                .end(function(err, res) {
+                    if (err) return done(err);
+                    expect(res.body).to.eql({"valid":false});
+                    done();
+                });
+        });
 
     });
+    //     describe('POST /build_quiz', function() {
+//         describe('bad requests', function() {
+//             describe('missing parameters', function() {
+//                 var isSeedValidStub;
+//                 var validateQuizDescriptorStub;
+//                 before(function() {
+//                     isSeedValidStub = sinon.stub(projectAwesome, 'isSeedValid', function() { return true; });
+//                     validateQuizDescriptorStub = sinon.stub(projectAwesome, 'validateQuizDescriptor', function() { return []; });
+//                 });
+//                 after(function() {
+//                     isSeedValidStub.restore();
+//                     validateQuizDescriptorStub.restore();
+//                 });
+//                 describe('no descriptor parameter', function() {
+//                     it('should respond with 400', function(done) {
+//                         request(app)
+//                         .post('/v1/build_quiz')
+//                         .send({seed:'someseed'})
+//                         .expect(400)
+//                         .end(done);
+//                     });
+//                 });
+    describe('POST /validate', function() {
 
+        var qd1 = '{    "version" : "0.1",    "questions": [{ 	    "question": "fr-change-of-base", 	    "repeat": 5 	}] }';
+        it('should validate correct type', function(done) {
+            request(app)
+            
+                .post('/v1/validate')
+                
+                .send({type: 'qd', value: qd1})
+                .expect(200)
+                .end(function(err, res) {
+                    if (err) return done(err);
+                    expect(res.body).to.eql({result: []});
+                    done();
+                });
+        });
+        
+
+        it('should respond with error 400 when post is empty', function(done) {
+            request(app)
+                .post('/v1/validate')
+                .expect(400)
+                .end(done);
+        });
+        
+        it('should respond with error 400 with invalid type, and error message', function(done) {
+            request(app)
+                .post('/v1/validate')
+                .send({type: 'notQuizDescriptor', value: qd1})
+                .expect(400)
+                .end(function(err, res) {
+                        if (err) return done(err);
+                        expect(res.body).eql({ error: 'Illegal Argument: notQuizDescriptor'});
+                        done();
+                });
+        });
+        it('should validate valid type with invalid value', function(done) {
+            request(app)
+                .post('/v1/validate')
+                .send({type: 'qd', value: {puppies: true}})
+                .expect(200)
+                .end(function(err, res) {
+                    if (err) return done(err);
+                    expect(res.body).length;
+                    done();
+                });
+        });
+        
+    });
+    
+    describe('POST /generate', function() {
+
+        var qd1 = '{    "version" : "0.1",    "questions": [{ 	    "question": "fr-change-of-base", 	    "repeat": 5 	}] }';
+        it('should generate with valid args and type:json', function(done) {
+            request(app)
+                .post('/v1/generate')
+                .send({type: 'json', qd: qd1, seed: 'abcd1234'})
+                .expect(200)
+                .end(done);
+        });
+        it('should generate with valid args and type:moodleXML', function(done) {
+            request(app)
+                .post('/v1/generate')
+                .send({type: 'moodleXML', qd: {kittens: 'chuck'}, seed: 'abcd1234'})
+                .expect(400)
+                .end(done);
+        });
+        
+        it('should not generate with invalid type', function(done) {
+            request(app)
+                .post('/v1/generate')
+                .send({type: 'invalidType', qd: qd1, seed: 'abcd1234'})
+                .expect(400)
+                .end(function(err, res) {
+                        if (err) return done(err);
+                        expect(res.body).eql({ error: 'Illegal Argument: invalidType'});
+                        done();
+                });
+        });
+        it('should not generate with invalid qd', function(done) {
+            request(app)
+                .post('/v1/generate')
+                .send({type: 'moodleXML', qd: {kittens: 'chuck'}, seed: 'abcd1234'})
+                .expect(400)
+                .end(done);
+        });
+        it('should not generate with invalid seed', function(done) {
+            request(app)
+                .post('/v1/generate')
+                .send({type: 'json', qd: qd1, seed: 'NotAValidSeed'})
+                .expect(400)
+                .end(done);
+        });
+        
+        
+
+        it('should respond with error 400 when post is empty', function(done) {
+            request(app)
+                .post('/v1/generate')
+                .expect(400)
+                .end(done);
+        });
+        
+    });
 });
+
 
 // describe('v1 API', function() {
 
@@ -442,8 +653,3 @@ describe('v1 API', function() {
 //         });
 //     });
 // });
-
-
-
-
-
